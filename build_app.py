@@ -329,6 +329,7 @@ TEMPLATE = r"""<!DOCTYPE html>
   .tag.sec{color:var(--accent)}
   .quote{font-size:14.5px;color:#c3cfdd;line-height:1.6;margin:0}
   .quote mark{background:rgba(240,166,60,.24);color:#ffe2b8;border-radius:3px;padding:0 2px}
+  .timeline{padding-left:24px;margin:0}.timeline li{padding:5px 0;color:#c3cfdd}.timeline li strong{color:var(--accent)}
   details{margin-top:10px}
   summary{cursor:pointer;color:var(--accent2);font-size:14px;list-style:none}
   summary::-webkit-details-marker{display:none}
@@ -358,7 +359,7 @@ TEMPLATE = r"""<!DOCTYPE html>
 <script>
 const FRAGMENTS = /*__DATA__*/;
 
-const STOP = new Set("что такое это этот эта эти как какой какая какие кто когда где почему зачем сколько чем чём кого кому чего чей таковый ли же бы не ни и а но или да нет уж уже ещё еще также тоже все всё весь вся они оно она он мы вы ты я меня мне тебя его её ее их них нам вам таки этот того тем том при о об от до по из за на в во с со к ко не для над под про через между без около после перед вместо кроме сквозь ради благодаря вопреки согласно".split(" "));
+const STOP = new Set("что такое это этот эта эти как какой какая какие кто когда где почему зачем сколько чем чём кого кому чего чей таковый ли же бы не ни и а но или да нет уж уже ещё еще также тоже все всё весь вся они оно она он мы вы ты я меня мне тебя его её ее их них нам вам таки этот того тем том при о об от до по из за на в во с со к ко не для над под про через между без около после перед вместо кроме сквозь ради благодаря вопреки согласно напиши написать расскажи перечисли покажи кратко полностью полный полную всю всех главные главный список обзор учебнику учебника пожалуйста мне нужно мне нужны составь составить ответ ответь назови укажи вариантов вариант варианты правильного ответа ответе будет хронология хронологию даты события событий каком какая какого каких городе города месте место произошла произошло происходил происходило происходили было были был была является сражение сражения сражении битва битвы битве войско войска войском армии армия опция выбери выберите началас началось начиналась начиналось когда дата год".split(" "));
 
 const ENDINGS = ["иями","ями","ами","ыми","ими","ого","ему","ому","ыми","ей","ой","ый","ий","ая","ое","ые","ие","ии","ия","ию","ью","ам","ям","ах","ях","ом","ем","ов","ев","ий","ть","тся","ться","ся","ую","юю","у","ю","а","я","ы","и","е","о","ь"];
 
@@ -384,7 +385,31 @@ function tokens(text){
   return out;
 }
 
-const DOCS = FRAGMENTS.map(f=>{
+function timelineFragments(){
+  const out=[];
+  const pages=new Map();
+  const pattern=/(\d{3,4}(?:[—–-]\d{2,4})?)\s*(?:гг?\.?\s*)?[—–-]\s*/g;
+  for(const f of FRAGMENTS){
+    if(!(f.s||"").startsWith("Основные события")) continue;
+    pages.set(f.p,[...(pages.get(f.p)||[]),f.t]);
+  }
+  for(const [page,parts] of pages){
+    const text=parts.join(" ").replace(/\s+/g," ");
+    const matches=[...text.matchAll(pattern)];
+    for(let i=0;i<matches.length;i++){
+      const start=matches[i].index;
+      const end=i+1<matches.length?matches[i+1].index:text.length;
+      const entry=text.slice(start,end).trim().replace(/[;,.]+$/g,"");
+      if(entry.length<10) continue;
+      const source=FRAGMENTS.find(f=>f.p===page && (f.s||"").startsWith("Основные события"));
+      out.push({...source,t:entry,k:"core",timeline:true});
+    }
+  }
+  return out;
+}
+
+const INDEX_FRAGMENTS=FRAGMENTS.filter(f=>!(f.s||"").startsWith("Основные события")).concat(timelineFragments());
+const DOCS = INDEX_FRAGMENTS.map(f=>{
   const tf=new Map();
   const toks=tokens(f.t+" "+(f.s||""));
   for(const t of toks) tf.set(t,(tf.get(t)||0)+1);
@@ -416,15 +441,25 @@ function idf(term){
 const DATE_RE=/\b1[45]\d\d\b|\b16\d\d\b/;
 const DEF_RE=/—\s*это|это\s+—|называют|называется|означает|представляет собой|понимают/;
 const CAUSE_RE=/потому что|поэтому|причин|привёл|привел|привело|вследствие|не случайн|в отличие|толчок|подтолкнул|благодаря тому|в результате/;
+const INTENT_STOP=new Set("напиши написать расскажи перечисли покажи дай кратко полностью полный полную всю всех основные главный главные список обзор учебнику учебника пожалуйста мне нужно мне нужны составь составить ответ ответь назови укажи пожалуйста вариантов вариант варианты правильный правильный ответ ответе будет хронология хронологию даты события событий".split(" "));
 
-function questionKind(q){
+function questionIntent(q){
   const n=norm(q);
-  if(/что такое|определени|что значит|что означает|термин/.test(n)) return "def";
-  if(/когда|в каком году|какого года|год /.test(n)) return "date";
-  if(/почему|причин|зачем|следстви/.test(n)) return "cause";
-  if(/кто такой|кто такая|кто был|кто такие/.test(n)) return "person";
-  return "any";
+  let kind="any";
+  if(/что такое|определени|что значит|что означает|термин/.test(n)) kind="def";
+  else if(/почему|причин|зачем|следстви/.test(n)) kind="cause";
+  else if(/кто такой|кто такая|кто был|кто были|кто такие/.test(n)) kind="person";
+  else if(/в каком городе|каком городе|в каком месте|каком месте|где происход|где произош|месте произош|куда|откуда/.test(n)) kind="place";
+  else if(/когда|в каком году|какого года|год /.test(n)) kind="date";
+  const list=/хронолог|основные даты|все даты|список событий|основные события|перечисли .*событ|все события|по порядку|в хронологическом порядке/.test(n);
+  const broad=list || /перечисли|список|расскажи обо|расскажи про|все основные|полную картину|обзор/.test(n);
+  let focus=tokens(q).filter(t=>!INTENT_STOP.has(t));
+  if(kind==="date") focus=focus.filter(t=>!/(начал|год|дат|произош|происход|был|была|было|когда)/.test(t));
+  if(list && /хронолог|основные даты|все даты|событий|события/.test(n)) focus=focus.filter(t=>!/(хронолог|дат|событ|спис|поряд)/.test(t));
+  return {kind,list,broad,focus};
 }
+
+function questionKind(q){ return questionIntent(q).kind; }
 
 function hasDefinition(text){
   return splitSentences(text).some(s=>!s.trim().endsWith("?") && DEF_RE.test(s));
@@ -437,10 +472,21 @@ function entryTerm(text){
   return norm(m[1]);
 }
 
+function termFrequency(d, term){
+  const exact=d.tf.get(term)||0;
+  if(exact) return exact;
+  let partial=0;
+  for(const [word,count] of d.tf){
+    const prefix=Math.min(word.length,term.length);
+    if(prefix>=6 && (word.startsWith(term.slice(0,prefix)) || term.startsWith(word.slice(0,prefix)))) partial=Math.max(partial,count*0.65);
+  }
+  return partial;
+}
+
 function scoreDoc(d, qTerms, phrase, kind){
   let score=0, matched=0;
   for(const t of qTerms){
-    const tf=d.tf.get(t);
+    const tf=termFrequency(d,t);
     if(!tf) continue;
     matched++;
     const num=tf*(K1+1);
@@ -448,7 +494,7 @@ function scoreDoc(d, qTerms, phrase, kind){
     score+=idf(t)*num/den;
   }
   if(!matched) return 0;
-  score*=1+0.35*(matched/qTerms.length);
+  score*=1+0.45*(matched/qTerms.length);
   const plain=norm(d.f.t);
   if(phrase && phrase.length>6 && plain.includes(phrase)) score*=1.6;
   const sec=norm(d.f.s||"");
@@ -531,20 +577,15 @@ function definitionFor(text, qTerms){
 
 function bestSentence(text, qTerms, kind){
   const sentences=splitSentences(text);
-  let best="", bestScore=-1;
+  let best="", bestScore=0;
   for(const s of sentences){
-    const t=tokens(s);
-    let hits=0;
-    for(const term of qTerms) if(t.includes(term)) hits++;
-    let score=hits*10 + Math.min(s.length,220)/60;
-    if(hits===0) score-=35;
-    if(s.trim().endsWith("?")) score-=9;
-    if(kind==="def" && DEF_RE.test(s)) score+=6;
-    if(kind==="date" && DATE_RE.test(s)) score+=5;
-    if(kind==="cause" && CAUSE_RE.test(s)) score+=5;
+    let score=sentenceRelevance(s,qTerms);
+    if(!score) continue;
+    if(kind==="def" && DEF_RE.test(s)) score*=1.2;
+    if(kind==="date" && DATE_RE.test(s)) score*=1.5;
+    if(kind==="cause" && CAUSE_RE.test(s)) score*=1.25;
     if(score>bestScore){bestScore=score;best=s;}
   }
-  if(bestScore<0) return "";
   return best;
 }
 
@@ -572,6 +613,90 @@ function pickKey(f, qTerms, kind){
   return key;
 }
 
+function sentenceMatchCount(sentence, qTerms){
+  const sentTerms=tokens(sentence);
+  let hits=0;
+  for(const term of qTerms){
+    if(sentTerms.some(word=>{
+      if(word===term) return true;
+      const prefix=Math.min(word.length,term.length);
+      return prefix>=6 && (word.startsWith(term.slice(0,prefix)) || term.startsWith(word.slice(0,prefix)));
+    })) hits++;
+  }
+  return hits;
+}
+
+function sentenceRelevance(sentence, qTerms){
+  if(!qTerms.length) return 0;
+  const hits=sentenceMatchCount(sentence,qTerms);
+  let weight=0;
+  for(const term of qTerms){
+    if(tokens(sentence).some(word=>word===term || (Math.min(word.length,term.length)>=6 && (word.startsWith(term.slice(0,Math.min(word.length,term.length))) || term.startsWith(word.slice(0,Math.min(word.length,term.length))))))) weight+=idf(term);
+  }
+  return hits ? weight*(0.75+0.25*hits/qTerms.length) : 0;
+}
+
+function answerEvidence(fragments, qTerms, kind, limit=5){
+  const rows=[];
+  for(const f of INDEX_FRAGMENTS){
+    for(const sentence of splitSentences(f.t)){
+      let score=sentenceRelevance(sentence,qTerms);
+      if(!qTerms.length && (f.s||"").startsWith("Основные события")) score=1;
+      if(!score || sentence.trim().endsWith("?")) continue;
+      if(qTerms.length>1 && sentenceMatchCount(sentence,qTerms)<2) continue;
+      if(kind==="date" && DATE_RE.test(sentence)) score*=1.5;
+      if(kind==="cause" && CAUSE_RE.test(sentence)) score*=1.25;
+      if(kind==="def" && DEF_RE.test(sentence)) score*=1.2;
+      rows.push({text:sentence,page:f.p,section:f.s||"",score});
+    }
+  }
+  rows.sort((a,b)=>b.score-a.score || a.page-b.page);
+  const picked=[];
+  for(const row of rows){
+    if(picked.some(x=>x.text===row.text)) continue;
+    picked.push(row);
+    if(picked.length>=limit) break;
+  }
+  if(kind==="date") picked.sort((a,b)=>a.page-b.page);
+  return picked;
+}
+
+function timelineEvidence(qTerms=[]){
+  const grouped=new Map();
+  for(const f of FRAGMENTS){
+    if((f.s||"").startsWith("Основные события")) grouped.set(f.p,[...(grouped.get(f.p)||[]),f.t]);
+  }
+  const entries=[];
+  const datePattern=/(\d{3,4}(?:[—–-]\d{2,4})?)\s*(?:гг?\.?\s*)?[—–-]\s*/g;
+  for(const [page,parts] of grouped){
+    const text=parts.join(" ").replace(/\s+/g," ");
+    const matches=[...text.matchAll(datePattern)];
+    for(let i=0;i<matches.length;i++){
+      const start=matches[i].index+matches[i][0].length;
+      const end=i+1<matches.length?matches[i+1].index:text.length;
+      const event=text.slice(start,end).replace(/\s+/g," ").trim().replace(/[;,.]$/g,"");
+      if(event.length<5) continue;
+      const date=matches[i][1].replace(/[—–-]/g,"—");
+      const previous=entries[entries.length-1];
+      if(previous && previous.date===date && previous.event.length>10 && event.length<35) previous.event+=` ${event}`;
+      else entries.push({date,event,page});
+    }
+  }
+  if(!qTerms.length) return entries;
+  const relevant=entries.filter(item=>{
+    const words=tokens(item.event);
+    const matches=qTerms.filter(term=>words.some(word=>word===term || (Math.min(word.length,term.length)>=6 && (word.startsWith(term.slice(0,Math.min(word.length,term.length))) || term.startsWith(word.slice(0,Math.min(word.length,term.length)))))));
+    return matches.length>=Math.min(2,qTerms.length);
+  });
+  return relevant;
+}
+
+function renderTimeline(entries){
+  if(!entries || !entries.length) return "";
+  const rows=entries.map(item=>`<li><strong>${escapeHtml(item.date)}</strong> — ${escapeHtml(item.event)} <span class="tag">стр. ${item.page}</span></li>`).join("");
+  return `<div class="card"><div class="meta"><span class="tag">Хронология из учебника · ${entries.length} событий</span></div><ol class="timeline">${rows}</ol></div>`;
+}
+
 function briefFor(f, qTerms, kind){
   if(kind==="def"){
     const def=definitionFor(f.t, qTerms);
@@ -584,6 +709,14 @@ function briefFor(f, qTerms, kind){
     }
   }
   return pickKey(f, qTerms, kind);
+}
+
+function renderEvidenceAnswer(fragments,qWords,qTerms,kind){
+  const evidence=answerEvidence(fragments,qTerms,kind,4);
+  if(evidence.length<2) return "";
+  return `<div class="card"><div class="meta"><span class="tag">Ответ по учебнику · подтверждённые фрагменты</span></div>`+
+    evidence.map(row=>`<div class="meta"><span class="tag">стр. ${row.page}</span></div><p class="quote">${highlight(row.text,qWords)}</p>`).join("")+
+    `</div>`;
 }
 
 function renderCard(f, qWords, qTerms, kind, isLead){
@@ -607,29 +740,36 @@ function renderCard(f, qWords, qTerms, kind, isLead){
 }
 
 function search(query){
-  const qWords=norm(query).split(" ").filter(w=>w.length>1);
-  const qTerms=tokens(query);
-  const kind=questionKind(query);
-  if(!qTerms.length) return {kind, hits:[]};
-  const unknown=qTerms.filter(t=>!DF.has(t));
-  if(unknown.length && qTerms.length<=3) return {kind, hits:[], unknown};
+  const intent=questionIntent(query);
+  const qTerms=intent.focus;
+  const kind=intent.kind;
+  if(!qTerms.length && !intent.list && !intent.broad) return {kind,hits:[],intent};
+  if(intent.list){
+    const timeline=timelineEvidence(qTerms);
+    if(timeline.length) return {kind,hits:[],timeline,intent};
+  }
   const scored=[];
   for(const d of DOCS){
-    const s=scoreDoc(d, qTerms, norm(query), kind);
-    if(s>0) scored.push({d, s});
+    let score=scoreDoc(d,qTerms,norm(query),kind);
+    if(intent.list && (d.f.s||"").startsWith("Основные события")) score+=qTerms.length?score*0.35:1;
+    if(score>0) scored.push({d,score});
   }
-  scored.sort((a,b)=>b.s-a.s);
-  let hits=scored.slice(0,8).map(x=>x.d.f);
+  scored.sort((a,b)=>b.score-a.score);
+  let hits=scored.slice(0,intent.broad?24:14).map(x=>x.d.f);
+  if(intent.broad && qTerms.length){
+    const evidence=answerEvidence(hits,qTerms,kind,8);
+    if(evidence.length>=2) return {kind,hits,timeline:null,evidence,intent};
+  }
   const core=hits.filter(f=>f.k!=="task");
   if(core.length) hits=core;
-  hits=hits.slice(0,5);
-  if(!hits.length){
-    hits=DOCS.filter(d=>qTerms.some(t=>[...d.tf.keys()].some(k=>k.startsWith(t.slice(0,5))))).slice(0,3).map(d=>d.f);
+  hits=hits.slice(0,intent.broad?8:5);
+  let evidence=answerEvidence(hits,qTerms,kind,intent.broad?8:4);
+  if(kind==="date"){
+    const dated=timelineEvidence(qTerms).map(item=>({text:`${item.date} г. — ${item.event}`,page:item.page,section:"Основные события",score:100}));
+    if(dated.length) evidence=[...dated,...evidence.filter(row=>!dated.some(item=>item.text===row.text))];
   }
-  let mustTerm=qTerms.slice().sort((a,b)=>(b.length-a.length)||(idf(b)-idf(a)))[0];
-  const supported=hits.some(f=>splitSentences(f.t).some(s=>sentenceHas(s, [mustTerm])));
-  if(!supported) return {kind, hits:[], unknown:[mustTerm]};
-  return {kind, hits};
+  if(!hits.length || !evidence.length) return {kind,hits:[],intent};
+  return {kind,hits,evidence,intent};
 }
 
 const log=document.getElementById("log");
@@ -639,18 +779,19 @@ const go=document.getElementById("go");
 function ask(query){
   query=query.trim();
   if(!query) return;
-  const {kind, hits, unknown}=search(query);
+  const result=search(query);
+  const {kind,hits,intent}=result;
   const qWords=norm(query).split(" ").filter(w=>w.length>1);
-  const qTerms=tokens(query);
+  const qTerms=intent.focus;
   let html=`<div class="q"><span>${escapeHtml(query)}</span></div>`;
   const hasDefinition=hits.some(f=>definitionFor(f.t, qTerms));
-  if(unknown && unknown.length){
-    html+=`<div class="card"><div class="meta"><span class="tag">нет в учебнике</span></div>
-      <p class="empty">Этого слова в учебнике нет. По этому курсу (конец XV — XVII в.)
-      такого материала не проходят, поэтому ответа в книге не найти.</p></div>`;
+  if(result.timeline){
+    html+=renderTimeline(result.timeline);
+  } else if(result.evidence && (result.evidence.length>=2 && (intent.broad || kind==="place") || kind==="date")){
+    html+=`<div class="card"><div class="meta"><span class="tag">Ответ составлен по тексту учебника</span></div>`+
+      result.evidence.map(row=>`<div class="meta"><span class="tag">стр. ${row.page}</span></div><p class="quote">${highlight(row.text,qWords)}</p>`).join("")+`</div>`;
   } else if(!hits.length){
-    html+=`<div class="card"><p class="empty">В учебнике нет ничего близкого к этому запросу.
-      Попробуй назвать термин, событие или имя так, как оно встречается в книге.</p></div>`;
+    html+=`<div class="card"><p class="empty">Не нашёл достаточно подтверждений в тексте учебника. Попробуй уточнить тему, имя, событие или добавить варианты ответа.</p></div>`;
   } else if(kind==="def" && !hasDefinition){
     const mentions=[];
     for(const f of hits){
