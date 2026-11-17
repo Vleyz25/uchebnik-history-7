@@ -1,0 +1,9 @@
+учебник.html
+uchebnik.apk
+build_log.txt
+build/
+data/
+__pycache__/
+android/app/src/main/assets/index.html
+*.keystore
+*.idsig
