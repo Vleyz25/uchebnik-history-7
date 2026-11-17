@@ -719,6 +719,27 @@ function renderEvidenceAnswer(fragments,qWords,qTerms,kind){
     `</div>`;
 }
 
+function answerLine(row,kind){
+  const text=row.text.replace(/[.!?]+$/g,"").trim();
+  if(kind==="place"){
+    const place=text.match(/\b(?:при|в городе|в местечке|на поле)\s+([А-ЯЁ][а-яё-]+)/);
+    if(place) return `Место сражения — ${place[1]}.`;
+  }
+  if(kind==="date"){
+    const date=text.match(/\b(1[4-8]\d\d(?:\s*[—–-]\s*1[4-8]\d\d)?)\s*г?\.?\s*[—–-]\s*(.+)/);
+    if(date) return `${date[2].replace(/[.!?]+$/g,"")}: ${date[1].replace(/\s*[—–-]\s*/g,"—")} гг.`;
+  }
+  return `По учебнику: ${text}.`;
+}
+
+function renderPrimaryAnswer(result,qWords,kind){
+  const row=result.evidence?.[0];
+  if(!row) return "";
+  const section=row.section?`<span class="tag sec">${escapeHtml(row.section)}</span>`:"";
+  const extra=result.evidence.slice(1,4).map(item=>`<li><span class="tag">стр. ${item.page}</span> ${highlight(item.text,qWords)}</li>`).join("");
+  return `<div class="card"><div class="meta"><span class="tag">Ответ по учебнику</span>${section}<span class="tag">стр. ${row.page}</span></div><p class="lead">${escapeHtml(answerLine(row,kind))}</p><details><summary>Цитата и основание ответа</summary><p class="quote">Страница ${row.page}: «${highlight(row.text,qWords)}»</p>${extra?`<ul class="quote">Дополнительные совпадения: ${extra}</ul>`:""}</details></div>`;
+}
+
 function renderCard(f, qWords, qTerms, kind, isLead){
   let body;
   if(isLead){
@@ -787,9 +808,8 @@ function ask(query){
   const hasDefinition=hits.some(f=>definitionFor(f.t, qTerms));
   if(result.timeline){
     html+=renderTimeline(result.timeline);
-  } else if(result.evidence && (result.evidence.length>=2 && (intent.broad || kind==="place") || kind==="date")){
-    html+=`<div class="card"><div class="meta"><span class="tag">Ответ составлен по тексту учебника</span></div>`+
-      result.evidence.map(row=>`<div class="meta"><span class="tag">стр. ${row.page}</span></div><p class="quote">${highlight(row.text,qWords)}</p>`).join("")+`</div>`;
+  } else if(result.evidence && result.evidence.length && (intent.broad || kind==="place" || kind==="date")){
+    html+=renderPrimaryAnswer(result,qWords,kind);
   } else if(!hits.length){
     html+=`<div class="card"><p class="empty">Не нашёл достаточно подтверждений в тексте учебника. Попробуй уточнить тему, имя, событие или добавить варианты ответа.</p></div>`;
   } else if(kind==="def" && !hasDefinition){
@@ -816,9 +836,10 @@ function ask(query){
     }
     html+=`</div>`;
   } else {
-    html+=renderCard(hits[0], qWords, qTerms, kind, true);
+    if(result.evidence && result.evidence.length) html+=renderPrimaryAnswer(result,qWords,kind);
+    else html+=renderCard(hits[0], qWords, qTerms, kind, true);
     if(hits.length>1){
-      html+=`<details class="more"><summary>Ещё ${hits.length-1} места в учебнике</summary>`;
+      html+=`<details class="more"><summary>Другие найденные фрагменты</summary>`;
       for(const f of hits.slice(1)) html+=renderCard(f, qWords, qTerms, kind, false);
       html+=`</details>`;
     }
