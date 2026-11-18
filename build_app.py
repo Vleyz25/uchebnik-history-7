@@ -719,8 +719,11 @@ function renderEvidenceAnswer(fragments,qWords,qTerms,kind){
     `</div>`;
 }
 
-function answerLine(row,kind){
+function answerLine(row,kind,query=""){
   const text=row.text.replace(/[.!?]+$/g,"").trim();
+  if(asksAbout95Theses(query)){
+    return "Вероятно, ты имеешь в виду тезисы Мартина Лютера: в 1517 году он выступил против продажи индульгенций. Учебник описывает это событие, но не приводит сами 95 тезисов.";
+  }
   if(kind==="place"){
     const place=text.match(/\b(?:при|в городе|в местечке|на поле)\s+([А-ЯЁ][а-яё-]+)/);
     if(place) return `Место сражения — ${place[1]}.`;
@@ -732,12 +735,12 @@ function answerLine(row,kind){
   return `По учебнику: ${text}.`;
 }
 
-function renderPrimaryAnswer(result,qWords,kind){
+function renderPrimaryAnswer(result,qWords,kind,query=""){
   const row=result.evidence?.[0];
   if(!row) return "";
   const section=row.section?`<span class="tag sec">${escapeHtml(row.section)}</span>`:"";
   const extra=result.evidence.slice(1,4).map(item=>`<li><span class="tag">стр. ${item.page}</span> ${highlight(item.text,qWords)}</li>`).join("");
-  return `<div class="card"><div class="meta"><span class="tag">Ответ по учебнику</span>${section}<span class="tag">стр. ${row.page}</span></div><p class="lead">${escapeHtml(answerLine(row,kind))}</p><details><summary>Цитата и основание ответа</summary><p class="quote">Страница ${row.page}: «${highlight(row.text,qWords)}»</p>${extra?`<ul class="quote">Дополнительные совпадения: ${extra}</ul>`:""}</details></div>`;
+  return `<div class="card"><div class="meta"><span class="tag">Ответ по учебнику</span>${section}<span class="tag">стр. ${row.page}</span></div><p class="lead">${escapeHtml(answerLine(row,kind,query))}</p><details><summary>Цитата и основание ответа</summary><p class="quote">Страница ${row.page}: «${highlight(row.text,qWords)}»</p>${extra?`<ul class="quote">Дополнительные совпадения: ${extra}</ul>`:""}</details></div>`;
 }
 
 function renderCard(f, qWords, qTerms, kind, isLead){
@@ -760,14 +763,27 @@ function renderCard(f, qWords, qTerms, kind, isLead){
   return `<div class="card"><div class="meta">${sec}<span class="tag">стр. ${f.p}</span></div>${body}</div>`;
 }
 
+const LOCAL_CONCEPT_MODEL=[
+  {match:/\b95\s+тезис|девяносто пять тезис/,anchors:["лютер","индульгенц","виттенберг","1517","реформац"]},
+  {match:/индульгенц|отпущени.{0,20}грех|продаж.{0,20}грех/,anchors:["лютер","1517","виттенберг","реформац"]},
+  {match:/мартин\s+лютер|\bлютер\b/,anchors:["индульгенц","виттенберг","1517","реформац"]}
+];
+
+function expandTopicTerms(query,terms){
+  const normalized=norm(query);
+  const anchors=LOCAL_CONCEPT_MODEL.filter(concept=>concept.match.test(normalized)).flatMap(concept=>concept.anchors);
+  return [...new Set([...terms,...anchors])];
+}
+function asksAbout95Theses(query){return /\b95\s+тезис|девяносто пять тезис/i.test(norm(query));}
+
 function search(query){
   const intent=questionIntent(query);
-  const qTerms=intent.focus;
+  const qTerms=expandTopicTerms(query,intent.focus);
   const kind=intent.kind;
-  if(!qTerms.length && !intent.list && !intent.broad) return {kind,hits:[],intent};
+  if(!qTerms.length && !intent.list && !intent.broad) return {kind,hits:[],intent,queryTerms:qTerms};
   if(intent.list){
     const timeline=timelineEvidence(qTerms);
-    if(timeline.length) return {kind,hits:[],timeline,intent};
+    if(timeline.length) return {kind,hits:[],timeline,intent,queryTerms:qTerms};
   }
   const scored=[];
   for(const d of DOCS){
@@ -779,7 +795,7 @@ function search(query){
   let hits=scored.slice(0,intent.broad?24:14).map(x=>x.d.f);
   if(intent.broad && qTerms.length){
     const evidence=answerEvidence(hits,qTerms,kind,8);
-    if(evidence.length>=2) return {kind,hits,timeline:null,evidence,intent};
+    if(evidence.length>=2) return {kind,hits,timeline:null,evidence,intent,queryTerms:qTerms};
   }
   const core=hits.filter(f=>f.k!=="task");
   if(core.length) hits=core;
@@ -789,8 +805,8 @@ function search(query){
     const dated=timelineEvidence(qTerms).map(item=>({text:`${item.date} г. — ${item.event}`,page:item.page,section:"Основные события",score:100}));
     if(dated.length) evidence=[...dated,...evidence.filter(row=>!dated.some(item=>item.text===row.text))];
   }
-  if(!hits.length || !evidence.length) return {kind,hits:[],intent};
-  return {kind,hits,evidence,intent};
+  if(!hits.length || !evidence.length) return {kind,hits:[],intent,queryTerms:qTerms};
+  return {kind,hits,evidence,intent,queryTerms:qTerms};
 }
 
 const log=document.getElementById("log");
@@ -803,13 +819,13 @@ function ask(query){
   const result=search(query);
   const {kind,hits,intent}=result;
   const qWords=norm(query).split(" ").filter(w=>w.length>1);
-  const qTerms=intent.focus;
+  const qTerms=result.queryTerms||intent.focus;
   let html=`<div class="q"><span>${escapeHtml(query)}</span></div>`;
   const hasDefinition=hits.some(f=>definitionFor(f.t, qTerms));
   if(result.timeline){
     html+=renderTimeline(result.timeline);
-  } else if(result.evidence && result.evidence.length && (intent.broad || kind==="place" || kind==="date")){
-    html+=renderPrimaryAnswer(result,qWords,kind);
+  } else if(result.evidence && result.evidence.length && (intent.broad || kind==="place" || kind==="date" || asksAbout95Theses(query))){
+    html+=renderPrimaryAnswer(result,qWords,kind,query);
   } else if(!hits.length){
     html+=`<div class="card"><p class="empty">Не нашёл достаточно подтверждений в тексте учебника. Попробуй уточнить тему, имя, событие или добавить варианты ответа.</p></div>`;
   } else if(kind==="def" && !hasDefinition){
@@ -836,7 +852,7 @@ function ask(query){
     }
     html+=`</div>`;
   } else {
-    if(result.evidence && result.evidence.length) html+=renderPrimaryAnswer(result,qWords,kind);
+    if(result.evidence && result.evidence.length) html+=renderPrimaryAnswer(result,qWords,kind,query);
     else html+=renderCard(hits[0], qWords, qTerms, kind, true);
     if(hits.length>1){
       html+=`<details class="more"><summary>Другие найденные фрагменты</summary>`;
