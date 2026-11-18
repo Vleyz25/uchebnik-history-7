@@ -798,8 +798,35 @@ function expandTopicTerms(query,terms){
 }
 function asksAbout95Theses(query){return /\b95\s+тезис|девяносто пять тезис/i.test(norm(query));}
 
+function dictionaryTerm(query){
+  const normalized=norm(query);
+  const stop=new Set(["что","такое","значит","означает","определение","дай","объясни","расскажи","понятие","термин","кратко","это","есть","про","об","мне","пожалуйста"]);
+  return tokens(normalized).filter(term=>!stop.has(term)).sort((a,b)=>b.length-a.length)[0]||"";
+}
+
+function dictionaryDefinition(query){
+  const term=dictionaryTerm(query);
+  if(!term) return null;
+  for(const fragment of FRAGMENTS){
+    if(!(fragment.s||"").startsWith("Словарь")) continue;
+    const definition=splitSentences(fragment.t).find(sentence=>{
+      const head=entryTerm(sentence);
+      if(!head) return false;
+      const headTerms=tokens(head);
+      return headTerms.some(word=>word===term || word.startsWith(term) || term.startsWith(word));
+    });
+    if(definition) return {text:definition,page:fragment.p,section:fragment.s||"Словарь понятий и терминов",term};
+  }
+  return null;
+}
+
 function search(query){
   const intent=questionIntent(query);
+  const dictionary=dictionaryDefinition(query);
+  if(intent.kind==="def" && dictionary){
+    const fragment=FRAGMENTS.find(item=>item.p===dictionary.page && item.s===dictionary.section && item.t.includes(dictionary.text));
+    return {kind:intent.kind,hits:fragment?[fragment]:[],evidence:[{text:dictionary.text,page:dictionary.page,section:dictionary.section,score:100}],intent,queryTerms:[dictionary.term],dictionary:true};
+  }
   const qTerms=expandTopicTerms(query,intent.focus);
   const kind=intent.kind;
   const hasLearnedConcept=LOCAL_CONCEPT_MODEL.some(concept=>concept.match.test(norm(query)));
@@ -856,6 +883,8 @@ function ask(query){
   const hasDefinition=hits.some(f=>definitionFor(f.t, qTerms));
   if(result.timeline){
     html+=renderTimeline(result.timeline);
+  } else if(result.dictionary && result.evidence?.length){
+    html+=renderPrimaryAnswer(result,qWords,kind,query);
   } else if(result.evidence && result.evidence.length && (intent.broad || kind==="place" || kind==="date" || asksAbout95Theses(query))){
     html+=renderPrimaryAnswer(result,qWords,kind,query);
   } else if(!hits.length){

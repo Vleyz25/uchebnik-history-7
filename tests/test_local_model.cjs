@@ -15,6 +15,16 @@ assert.ok(theses.evidence?.some(row => row.page === 63 && row.text.includes('М�
 assert.match(sandbox.answerForTest(theses.evidence[0], theses.kind, '95 тезисов'), /не приводит сами 95 тезисов/,
   'the answer must distinguish inferred topic from facts actually stated in the textbook');
 
+const absolutism = sandbox.searchForTest('что такое абсолютизм');
+assert.equal(absolutism.dictionary, true, 'dictionary definition should take priority over noisy learned associations');
+assert.equal(absolutism.evidence?.[0]?.page, 222, 'absolutism definition should come from the glossary on page 222');
+assert.match(absolutism.evidence[0].text, /политическая система.*власть монарха.*неограниченной/,
+  'definition should answer the term rather than report a mere mention');
+
+const mercantilism = sandbox.searchForTest('что значит меркантилизм');
+assert.equal(mercantilism.dictionary, true, 'other glossary terms should be answered through the same path');
+assert.match(mercantilism.evidence?.[0]?.text || '', /теория.*богатство страны/);
+
 const place = sandbox.searchForTest('в каком месте османы победили чешско-венгерское войско?');
 assert.ok(place.evidence?.[0]?.text.includes('Мохаче'), 'paraphrased place question should find Mohács');
 
