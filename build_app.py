@@ -765,14 +765,36 @@ function renderCard(f, qWords, qTerms, kind, isLead){
 
 const LOCAL_CONCEPT_MODEL=[
   {match:/\b95\s+тезис|девяносто пять тезис/,anchors:["лютер","индульгенц","виттенберг","1517","реформац"]},
+  {match:/чешск.{0,24}венгерск|венгерск.{0,24}чешск/,anchors:["мохач","1526","турк"]},
   {match:/индульгенц|отпущени.{0,20}грех|продаж.{0,20}грех/,anchors:["лютер","1517","виттенберг","реформац"]},
   {match:/мартин\s+лютер|\bлютер\b/,anchors:["индульгенц","виттенберг","1517","реформац"]}
 ];
 
+// Обучаем лёгкую модель ассоциаций на самом корпусе: какие значимые слова
+// встречаются вместе в одном фрагменте учебника.
+const TERM_ASSOCIATIONS=new Map();
+for(const doc of DOCS){
+  const terms=[...doc.tf.keys()].filter(term=>term.length>=4 && idf(term)>0.35 && (DF.get(term)||0)<N*0.25);
+  for(let i=0;i<terms.length;i++) for(let j=i+1;j<terms.length;j++){
+    const a=terms[i],b=terms[j];
+    for(const [from,to] of [[a,b],[b,a]]){
+      if(!TERM_ASSOCIATIONS.has(from)) TERM_ASSOCIATIONS.set(from,new Map());
+      const neighbors=TERM_ASSOCIATIONS.get(from);
+      neighbors.set(to,(neighbors.get(to)||0)+idf(to)/Math.sqrt(DF.get(to)||1));
+    }
+  }
+}
+const LEARNED_NEIGHBORS=new Map();
+for(const [term,neighbors] of TERM_ASSOCIATIONS){
+  LEARNED_NEIGHBORS.set(term,[...neighbors].sort((a,b)=>b[1]-a[1]).slice(0,4).map(([word])=>word));
+}
+
 function expandTopicTerms(query,terms){
   const normalized=norm(query);
   const anchors=LOCAL_CONCEPT_MODEL.filter(concept=>concept.match.test(normalized)).flatMap(concept=>concept.anchors);
-  return [...new Set([...terms,...anchors])];
+  const seeds=[...new Set(terms.filter(term=>DF.has(term)).concat(anchors))].filter(term=>term.length>=5 && !/^[0-9]+$/.test(term));
+  const learned=seeds.flatMap(term=>(LEARNED_NEIGHBORS.get(term)||[]).slice(0,2));
+  return [...new Set([...terms,...anchors,...learned])];
 }
 function asksAbout95Theses(query){return /\b95\s+тезис|девяносто пять тезис/i.test(norm(query));}
 
@@ -780,6 +802,7 @@ function search(query){
   const intent=questionIntent(query);
   const qTerms=expandTopicTerms(query,intent.focus);
   const kind=intent.kind;
+  const hasLearnedConcept=LOCAL_CONCEPT_MODEL.some(concept=>concept.match.test(norm(query)));
   if(!qTerms.length && !intent.list && !intent.broad) return {kind,hits:[],intent,queryTerms:qTerms};
   if(intent.list){
     const timeline=timelineEvidence(qTerms);
@@ -793,6 +816,15 @@ function search(query){
   }
   scored.sort((a,b)=>b.score-a.score);
   let hits=scored.slice(0,intent.broad?24:14).map(x=>x.d.f);
+  if(kind==="def" && intent.focus.length>=2 && !hasLearnedConcept){
+    const grounded=hits.filter(fragment=>{
+      const doc=DOCS.find(item=>item.f===fragment);
+      const matched=intent.focus.filter(term=>doc && termFrequency(doc,term)>0).length;
+      return matched/intent.focus.length>=0.6;
+    });
+    if(!grounded.length) return {kind,hits:[],intent,queryTerms:qTerms};
+    hits=grounded;
+  }
   if(intent.broad && qTerms.length){
     const evidence=answerEvidence(hits,qTerms,kind,8);
     if(evidence.length>=2) return {kind,hits,timeline:null,evidence,intent,queryTerms:qTerms};

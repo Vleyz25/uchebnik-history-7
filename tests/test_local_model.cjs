@@ -28,6 +28,6 @@ const unknown = sandbox.searchForTest('что такое квантовая ме
 assert.equal(unknown.hits.length, 0, 'unrelated out-of-curriculum query should abstain');
 assert.equal(unknown.evidence, undefined, 'unrelated out-of-curriculum query should not invent evidence');
 
-console.log('PASS local concept expansion for “95 тезисов”');
-console.log('PASS sourced place/date/timeline retrieval');
+console.log('PASS local concept expansion for “95 тезисов” and paraphrased Mohács question');
+console.log('PASS sourced date/timeline retrieval');
 console.log('PASS abstention for unsupported topic');
